@@ -31,7 +31,6 @@
 #define LOG(...)
 #endif
 
-
 //----------------------------------------------------------------------------------
 // Types and Structures Definition
 //----------------------------------------------------------------------------------
@@ -164,11 +163,11 @@ static void DrawSceneXR(Matrix view, Matrix proj)
     rlMatrixMode(RL_PROJECTION);
     rlPushMatrix();
     rlLoadIdentity();
-    rlMultMatrixf(MatrixToFloat(proj).v);
+    rlMultMatrixf(MatrixToFloat(proj));
 
     rlMatrixMode(RL_MODELVIEW);
     rlLoadIdentity();
-    rlMultMatrixf(MatrixToFloat(view).v);
+    rlMultMatrixf(MatrixToFloat(view));
 
     // ------------------------------------------------------------------
     // TODO: draw your real 3D world here instead of this placeholder
