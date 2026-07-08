@@ -100,8 +100,6 @@ ifeq ($(PLATFORM),PLATFORM_WEB)
     CLANG_PATH          = $(EMSDK_PATH)/upstream/bin
     PYTHON_PATH         = $(EMSDK_PATH)/python/3.13.3_64bit
     NODE_PATH           = $(EMSDK_PATH)/node/22.16.0_64bit/bin
-    LDFLAGS  += -s EXPORTED_FUNCTIONS=['_main','_XR_SetActive','_XR_SetEyeData','_XR_RenderFrame','_malloc','_free']
-    LDFLAGS  += -s EXPORTED_RUNTIME_METHODS=['ccall']
     # NOTE: Using := instead of = so Make expands it immediately and avoids
     # creating a recursively-expanded variable that references itself
     export PATH        := $(EMSDK_PATH);$(EMSCRIPTEN_PATH);$(CLANG_PATH);$(NODE_PATH);$(PYTHON_PATH);$(PATH)
@@ -244,6 +242,8 @@ ifeq ($(PLATFORM),PLATFORM_WEB)
     # --source-map-base          # allow debugging in browser with source map
     # --shell-file shell.html    # define a custom shell .html and output extension
     LDFLAGS += -sUSE_GLFW=3 -sTOTAL_MEMORY=$(BUILD_WEB_HEAP_SIZE) -sSTACK_SIZE=$(BUILD_WEB_STACK_SIZE) -sFORCE_FILESYSTEM=1 -sMINIFY_HTML=0
+    LDFLAGS  += -s EXPORTED_FUNCTIONS=['_main','_XR_SetActive','_XR_SetEyeData','_XR_RenderFrame','_malloc','_free']
+    LDFLAGS  += -s EXPORTED_RUNTIME_METHODS=['ccall']
 
     # Build using asyncify
     ifeq ($(BUILD_WEB_ASYNCIFY),TRUE)
