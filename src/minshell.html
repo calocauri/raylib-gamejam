@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en-us">
-  <head>
+<head>
     <meta charset="utf-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
 
@@ -35,64 +35,206 @@
 
     <!-- Web Style -->
     <style>
-        body { 
-          margin: 0px; 
-          overflow: hidden; 
-          background-color: black;
+        body {
+            margin: 0px;
+            overflow: hidden;
+            background-color: black;
         }
-        canvas.emscripten { 
-          border: 0px none; 
-          background-color: black;
-          padding-left: 0;
-          padding-right: 0;
-          margin-left: auto;
-          margin-right: auto;
-          display: block;
+
+        canvas.emscripten {
+            border: 0px none;
+            background-color: black;
+            padding-left: 0;
+            padding-right: 0;
+            margin-left: auto;
+            margin-right: auto;
+            display: block;
         }
+
+        #xr-button {
+            position: fixed;
+            bottom: 16px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            padding: 10px 20px;
+            font-size: 16px;
+            font-family: sans-serif;
+            border: none;
+            border-radius: 8px;
+            background: #7c3aed;
+            color: white;
+            cursor: pointer;
+        }
+
+            #xr-button:disabled {
+                background: #555;
+                cursor: not-allowed;
+            }
     </style>
-    <script type='text/javascript' src="https://cdn.jsdelivr.net/gh/eligrey/FileSaver.js/dist/FileSaver.min.js"> </script>
+    <script type='text/javascript' src="https://cdn.jsdelivr.net/gh/eligrey/FileSaver.js/dist/FileSaver.min.js"></script>
     <script type='text/javascript'>
         function saveFileFromMEMFSToDisk(memoryFSname, localFSname)     // This can be called by C/C++ code
         {
-            var isSafari = false; // Not supported, navigator.userAgent access is being restricted
-            //var isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-            var data = FS.readFile(memoryFSname);
-            var blob;
+        var isSafari = false;
+        var data = FS.readFile(memoryFSname);
+        var blob;
 
-            if (isSafari) blob = new Blob([data.buffer], { type: "application/octet-stream" });
-            else blob = new Blob([data.buffer], { type: "application/octet-binary" });
+        if (isSafari) blob = new Blob([data.buffer], { type: "application/octet-stream" });
+        else blob = new Blob([data.buffer], { type: "application/octet-binary" });
 
-            // NOTE: SaveAsDialog is a browser setting. For example, in Google Chrome,
-            // in Settings/Advanced/Downloads section you have a setting:
-            // 'Ask where to save each file before downloading' - which you can set true/false.
-            // If you enable this setting it would always ask you and bring the SaveAsDialog
-            saveAs(blob, localFSname);
+        saveAs(blob, localFSname);
         }
     </script>
-    </head>
-    <body>
-        <canvas class=emscripten id=canvas oncontextmenu=event.preventDefault() tabindex=-1></canvas>
-        <p id="output" />
-        <script>
-            var Module = {
-                print: (function() {
-                    var element = document.getElementById('output');
-                    if (element) element.value = ''; // clear browser cache
-                    return function(text) {
-                        if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
-                        console.log(text);
-                        if (element) {
-                          element.value += text + "\n";
-                          element.scrollTop = element.scrollHeight; // focus on bottom
-                        }
-                    };
-                })(),
-                canvas: (function() {
-                    var canvas = document.getElementById('canvas');
-                    return canvas;
-                })()
-            };
-        </script>
-        {{{ SCRIPT }}}
-    </body>
+</head>
+<body>
+    <canvas class=emscripten id=canvas oncontextmenu=event.preventDefault() tabindex=-1></canvas>
+    <button id="xr-button" disabled>Checking WebXR...</button>
+    <p id="output" />
+    <script>
+        var Module = {
+        print: (function() {
+        var element = document.getElementById('output');
+        if (element) element.value = '';
+        return function(text) {
+        if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
+        console.log(text);
+        if (element) {
+        element.value += text + "\n";
+        element.scrollTop = element.scrollHeight;
+        }
+        };
+        })(),
+        canvas: (function() {
+        var canvas = document.getElementById('canvas');
+        return canvas;
+        })()
+        };
+    </script>
+    {{{ SCRIPT }}}
+
+    <!-- ================= WebXR bridge ================= -->
+    <script type='text/javascript'>
+        (function () {
+        var xrButton = document.getElementById('xr-button');
+        var xrSession = null;
+        var xrRefSpace = null;
+        var glContext = null;
+
+        // Small helper: write a JS Float32Array into the WASM heap and
+        // return a pointer, so we can pass it as a `float*` via ccall.
+        function floatArrayToHeap(arr) {
+        var ptr = Module._malloc(arr.length * 4);
+        Module.HEAPF32.set(arr, ptr >> 2);
+        return ptr;
+        }
+
+        function getGLContext() {
+        // Reuse the exact WebGL context raylib/Emscripten already created
+        // on this canvas, instead of creating a new one.
+        var canvas = Module.canvas;
+        return canvas.getContext('webgl2') || canvas.getContext('webgl');
+        }
+
+        function onSessionEnded() {
+        xrSession = null;
+        Module.ccall('XR_SetActive', null, ['number'], [0]);
+        xrButton.textContent = 'Enter VR';
+        xrButton.disabled = false;
+        }
+
+        function onXRFrame(time, frame) {
+        xrSession.requestAnimationFrame(onXRFrame);
+
+        var pose = frame.getViewerPose(xrRefSpace);
+        if (!pose) return;
+
+        var glLayer = xrSession.renderState.baseLayer;
+
+        // Render into the WebXR framebuffer, not the default canvas framebuffer
+        glContext.bindFramebuffer(glContext.FRAMEBUFFER, glLayer.framebuffer);
+
+        for (var i = 0; i < pose.views.length && i < 2; i++) {
+        var view = pose.views[i];
+        var viewport = glLayer.getViewport(view);
+
+        var viewPtr = floatArrayToHeap(view.transform.inverse.matrix);
+        var projPtr = floatArrayToHeap(view.projectionMatrix);
+
+        Module.ccall(
+        'XR_SetEyeData', null,
+        ['number','number','number','number','number','number','number'],
+        [i, viewPtr, projPtr, viewport.x, viewport.y, viewport.width, viewport.height]
+        );
+
+        Module._free(viewPtr);
+        Module._free(projPtr);
+        }
+
+        Module.ccall('XR_RenderFrame', null, [], []);
+        }
+
+        async function enterXR() {
+        if (!navigator.xr) return;
+
+        xrButton.disabled = true;
+        xrButton.textContent = 'Starting VR...';
+
+        glContext = getGLContext();
+
+        // Make the existing GL context usable for WebXR rendering
+        if (glContext.makeXRCompatible) {
+        await glContext.makeXRCompatible();
+        }
+
+        xrSession = await navigator.xr.requestSession('immersive-vr', {
+        optionalFeatures: ['local-floor']
+        });
+
+        xrSession.addEventListener('end', onSessionEnded);
+
+        var xrLayer = new XRWebGLLayer(xrSession, glContext);
+        xrSession.updateRenderState({ baseLayer: xrLayer });
+
+        try {
+        xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
+        } catch (e) {
+        xrRefSpace = await xrSession.requestReferenceSpace('local');
+        }
+
+        Module.ccall('XR_SetActive', null, ['number'], [1]);
+
+        xrButton.textContent = 'Exit VR';
+        xrButton.disabled = false;
+        xrButton.onclick = function () { xrSession.end(); };
+
+        xrSession.requestAnimationFrame(onXRFrame);
+        }
+
+        function checkXRSupport() {
+        if (!navigator.xr) {
+        xrButton.textContent = 'WebXR not available';
+        return;
+        }
+        navigator.xr.isSessionSupported('immersive-vr').then(function (supported) {
+        if (supported) {
+        xrButton.textContent = 'Enter VR';
+        xrButton.disabled = false;
+        xrButton.onclick = enterXR;
+        } else {
+        xrButton.textContent = 'No VR headset found';
+        }
+        });
+        }
+
+        // Wait until the wasm module has finished loading before enabling the button
+        if (Module.calledRun) {
+        checkXRSupport();
+        } else {
+        Module.onRuntimeInitialized = checkXRSupport;
+        }
+        })();
+    </script>
+    <!-- =============== end WebXR bridge =============== -->
+</body>
 </html>
