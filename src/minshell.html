@@ -171,6 +171,50 @@
         Module._free(projPtr);
         }
 
+        // ---- Controllers ----
+        for (var s = 0; s < frame.session.inputSources.length; s++) {
+        var inputSource = frame.session.inputSources[s];
+        var hand = inputSource.handedness === 'left' ? 0
+        : inputSource.handedness === 'right' ? 1 : -1;
+        if (hand === -1) continue; // skip untracked / other input sources
+
+        var targetSpace = inputSource.gripSpace || inputSource.targetRaySpace;
+        var inputPose = targetSpace ? frame.getPose(targetSpace, xrRefSpace) : null;
+
+        var connected = inputPose ? 1 : 0;
+        var px = 0, py = 0, pz = 0, qx = 0, qy = 0, qz = 0, qw = 1;
+        if (inputPose) {
+        var p = inputPose.transform.position;
+        var o = inputPose.transform.orientation;
+        px = p.x; py = p.y; pz = p.z;
+        qx = o.x; qy = o.y; qz = o.z; qw = o.w;
+        }
+
+        var trigger = 0, grip = 0, thumbX = 0, thumbY = 0;
+        var buttonA = 0, buttonB = 0, thumbClick = 0;
+        var gp = inputSource.gamepad;
+        if (gp) {
+        // 'xr-standard' mapping (Quest/Touch/Index controllers):
+        // buttons[0]=trigger, [1]=grip/squeeze, [3]=thumbstick click,
+        // [4]=A/X, [5]=B/Y ; axes[2],[3]=thumbstick x/y
+        if (gp.buttons[0]) trigger = gp.buttons[0].value;
+        if (gp.buttons[1]) grip = gp.buttons[1].value;
+        if (gp.buttons[3]) thumbClick = gp.buttons[3].pressed ? 1 : 0;
+        if (gp.buttons[4]) buttonA = gp.buttons[4].pressed ? 1 : 0;
+        if (gp.buttons[5]) buttonB = gp.buttons[5].pressed ? 1 : 0;
+        if (gp.axes.length >= 4) { thumbX = gp.axes[2]; thumbY = gp.axes[3]; }
+        else if (gp.axes.length >= 2) { thumbX = gp.axes[0]; thumbY = gp.axes[1]; }
+        }
+
+        Module.ccall(
+        'XR_SetController', null,
+        ['number','number','number','number','number','number','number','number','number',
+        'number','number','number','number','number','number','number'],
+        [hand, connected, px, py, pz, qx, qy, qz, qw,
+        trigger, grip, thumbX, thumbY, buttonA, buttonB, thumbClick]
+        );
+        }
+
         Module.ccall('XR_RenderFrame', null, [], []);
         }
 

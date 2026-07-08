@@ -48,6 +48,19 @@ typedef struct XREyeData {
     Matrix proj;
     int vpX, vpY, vpW, vpH;
 } XREyeData;
+
+// Per-controller data received from the WebXR session each frame
+typedef struct XRControllerData {
+    bool connected;
+    Vector3 position;
+    Quaternion orientation;
+    float trigger;           // 0.0 - 1.0
+    float grip;              // 0.0 - 1.0
+    float thumbX, thumbY;    // thumbstick / touchpad axes, -1.0 - 1.0
+    bool buttonA;            // primary face button (A / X)
+    bool buttonB;            // secondary face button (B / Y)
+    bool thumbClick;         // thumbstick pressed in
+} XRControllerData;
 #endif
 
 //----------------------------------------------------------------------------------
@@ -62,6 +75,7 @@ static int frameCounter = 0;
 #if defined(PLATFORM_WEB)
 static bool xrActive = false;            // Are we currently inside a WebXR session?
 static XREyeData xrEye[2] = { 0 };       // [0] = left eye, [1] = right eye
+static XRControllerData xrController[2] = { 0 };  // [0] = left hand, [1] = right hand
 #endif
 
 //----------------------------------------------------------------------------------
@@ -153,6 +167,32 @@ void XR_SetEyeData(int eye, float* viewMat, float* projMat, int vpX, int vpY, in
     xrEye[eye].vpH = vpH;
 }
 
+// Called by JS once per connected controller, per XRFrame, BEFORE XR_RenderFrame().
+// hand: 0 = left, 1 = right
+// position/orientation: controller pose in the same space as the eye matrices
+// trigger/grip: 0.0-1.0 analog values; thumbX/thumbY: -1.0 to 1.0 stick axes
+// buttonA/buttonB/thumbClick: 0 or 1
+EMSCRIPTEN_KEEPALIVE
+void XR_SetController(int hand, int connected,
+    float px, float py, float pz,
+    float qx, float qy, float qz, float qw,
+    float trigger, float grip, float thumbX, float thumbY,
+    int buttonA, int buttonB, int thumbClick)
+{
+    if ((hand < 0) || (hand > 1)) return;
+
+    xrController[hand].connected = (connected != 0);
+    xrController[hand].position = (Vector3){ px, py, pz };
+    xrController[hand].orientation = (Quaternion){ qx, qy, qz, qw };
+    xrController[hand].trigger = trigger;
+    xrController[hand].grip = grip;
+    xrController[hand].thumbX = thumbX;
+    xrController[hand].thumbY = thumbY;
+    xrController[hand].buttonA = (buttonA != 0);
+    xrController[hand].buttonB = (buttonB != 0);
+    xrController[hand].thumbClick = (thumbClick != 0);
+}
+
 // Draws your 3D scene using an externally supplied view/projection matrix
 // NOTE: This bypasses raylib's Camera3D / BeginMode3D() math entirely,
 // since WebXR already gives us the exact per-eye projection.
@@ -175,6 +215,31 @@ static void DrawSceneXR(Matrix view, Matrix proj)
     DrawGrid(10, 1.0f);
     DrawCube((Vector3) { 0.0f, 0.5f, -1.5f }, 0.5f, 0.5f, 0.5f, RED);
     DrawCubeWires((Vector3) { 0.0f, 0.5f, -1.5f }, 0.5f, 0.5f, 0.5f, MAROON);
+
+    // Draw connected controllers: a sphere at each hand (brighter while the
+    // trigger is held) plus a thin aiming ray pointing in their forward direction
+    for (int hand = 0; hand < 2; hand++)
+    {
+        if (!xrController[hand].connected) continue;
+
+        Color handColor = (hand == 0) ? SKYBLUE : ORANGE;
+        // Blend towards white as the trigger is pressed, as a simple visual cue
+        handColor = ColorLerp(handColor, WHITE, xrController[hand].trigger);
+
+        DrawSphere(xrController[hand].position, 0.03f, handColor);
+
+        // Controllers point down their local -Z axis by convention (targetRaySpace)
+        Matrix rot = QuaternionToMatrix(xrController[hand].orientation);
+        Vector3 forward = Vector3Transform((Vector3) { 0.0f, 0.0f, -1.0f }, rot);
+        Vector3 rayEnd = Vector3Add(xrController[hand].position, Vector3Scale(forward, 3.0f));
+        DrawLine3D(xrController[hand].position, rayEnd, handColor);
+
+        // Example: grow the grip cube when squeezing, useful while wiring up input
+        if (xrController[hand].grip > 0.5f)
+        {
+            DrawCubeWires(xrController[hand].position, 0.08f, 0.08f, 0.08f, handColor);
+        }
+    }
     // ------------------------------------------------------------------
 
     rlDrawRenderBatchActive();     // Flush the 3D batch with this eye's matrices

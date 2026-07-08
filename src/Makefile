@@ -247,7 +247,7 @@ ifeq ($(PLATFORM),PLATFORM_WEB)
     # --source-map-base          # allow debugging in browser with source map
     # --shell-file shell.html    # define a custom shell .html and output extension
     LDFLAGS += -sUSE_GLFW=3 -sTOTAL_MEMORY=$(BUILD_WEB_HEAP_SIZE) -sSTACK_SIZE=$(BUILD_WEB_STACK_SIZE) -sFORCE_FILESYSTEM=1 -sMINIFY_HTML=0
-    LDFLAGS  += -s "EXPORTED_FUNCTIONS=['_main','_XR_SetActive','_XR_SetEyeData','_XR_RenderFrame','_malloc','_free']"
+    LDFLAGS  += -s "EXPORTED_FUNCTIONS=['_main','_XR_SetActive','_XR_SetEyeData','_XR_RenderFrame','_XR_SetController','_malloc','_free']"
     LDFLAGS  += -s "EXPORTED_RUNTIME_METHODS=['ccall', 'HEAPF32']"
 
     # Build using asyncify
