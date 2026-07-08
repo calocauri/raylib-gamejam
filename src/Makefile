@@ -100,8 +100,8 @@ ifeq ($(PLATFORM),PLATFORM_WEB)
     CLANG_PATH          = $(EMSDK_PATH)/upstream/bin
     PYTHON_PATH         = $(EMSDK_PATH)/python/3.13.3_64bit
     NODE_PATH           = $(EMSDK_PATH)/node/22.16.0_64bit/bin
-    EMSCRIPTEN_FLAGS += -s EXPORTED_FUNCTIONS=['_main','_XR_SetActive','_XR_SetEyeData','_XR_RenderFrame','_malloc','_free']
-    EMSCRIPTEN_FLAGS += -s EXPORTED_RUNTIME_METHODS=['ccall']
+    LDFLAGS  += -s EXPORTED_FUNCTIONS=['_main','_XR_SetActive','_XR_SetEyeData','_XR_RenderFrame','_malloc','_free']
+    LDFLAGS  += -s EXPORTED_RUNTIME_METHODS=['ccall']
     # NOTE: Using := instead of = so Make expands it immediately and avoids
     # creating a recursively-expanded variable that references itself
     export PATH        := $(EMSDK_PATH);$(EMSCRIPTEN_PATH);$(CLANG_PATH);$(NODE_PATH);$(PYTHON_PATH);$(PATH)
