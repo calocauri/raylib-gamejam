@@ -95,3 +95,14 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       if: github.event_name == 'release' && github.event.action == 'published'
+     
+    - name: Deploy to itch.io
+      uses: yeslayla/butler-publish-itchio-action@master
+      env:
+        BUTLER_CREDENTIALS: ${{ secrets.BUTLER_API_KEY }}
+        CHANNEL: html5
+        ITCH_GAME: raylib-gamejam-2026
+        ITCH_USER: calocauri
+        PACKAGE: ${{ env.PROJECT_RELEASE_PATH }}
+        VERSION: ${{ github.run_number }}
+      if: github.event_name == 'release' && github.event.action == 'published'
