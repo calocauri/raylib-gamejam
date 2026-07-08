@@ -48,6 +48,11 @@ COMPILER_PATH         ?= C:\raylib\w64devkit\bin
 # Build mode for project: DEBUG or RELEASE
 BUILD_MODE            ?= RELEASE
 
+ifeq ($(OS),Windows_NT)
+    SHELL := cmd.exe
+    .SHELLFLAGS := /C
+endif
+
 # PLATFORM_WEB: Default properties
 BUILD_WEB_ASYNCIFY    ?= FALSE
 BUILD_WEB_SHELL       ?= minshell.html
