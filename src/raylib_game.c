@@ -1,6 +1,6 @@
 /*******************************************************************************************
 *
-*   raylib gamejam template + WebXR support
+*   raylib gamejam template + WebXR + Box3D
 *
 *   Code licensed under an unmodified zlib/libpng license, which is an OSI-certified,
 *   BSD-like license that allows static linking with closed source software
@@ -13,23 +13,17 @@
 #include "raymath.h"
 #include "rlgl.h"
 
+#include "game.h"
+#include "xr.h"
+
 #if defined(PLATFORM_WEB)
-#include <emscripten/emscripten.h>      // Emscripten library
+    #include "physics.h"
+    #include <emscripten/emscripten.h>
 #endif
 
-#include <stdio.h>                          // Required for: printf()
-#include <stdlib.h>                         // Required for:
-#include <string.h>                         // Required for:
-
-//----------------------------------------------------------------------------------
-// Defines and Macros
-//----------------------------------------------------------------------------------
-#define SUPPORT_LOG_INFO
-#if defined(SUPPORT_LOG_INFO)
-#define LOG(...) printf(__VA_ARGS__)
-#else
-#define LOG(...)
-#endif
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 //----------------------------------------------------------------------------------
 // Types and Structures Definition
@@ -41,52 +35,31 @@ typedef enum {
     SCREEN_ENDING
 } GameScreen;
 
-#if defined(PLATFORM_WEB)
-// Per-eye data received from the WebXR session each frame
-typedef struct XREyeData {
-    Matrix view;
-    Matrix proj;
-    int vpX, vpY, vpW, vpH;
-} XREyeData;
-
-// Per-controller data received from the WebXR session each frame
-typedef struct XRControllerData {
-    bool connected;
-    Vector3 position;
-    Quaternion orientation;
-    float trigger;           // 0.0 - 1.0
-    float grip;              // 0.0 - 1.0
-    float thumbX, thumbY;    // thumbstick / touchpad axes, -1.0 - 1.0
-    bool buttonA;            // primary face button (A / X)
-    bool buttonB;            // secondary face button (B / Y)
-    bool thumbClick;         // thumbstick pressed in
-} XRControllerData;
-#endif
-
 //----------------------------------------------------------------------------------
 // Global Variables Definition (local to this module)
 //----------------------------------------------------------------------------------
 static const int screenWidth = 720;
 static const int screenHeight = 720;
 
-static RenderTexture2D target = { 0 };  // Render texture to render our game (non-XR path)
+static RenderTexture2D target = { 0 };  // Render texture for the non-XR 2D template
 static int frameCounter = 0;
 
 #if defined(PLATFORM_WEB)
-static bool xrActive = false;            // Are we currently inside a WebXR session?
-static XREyeData xrEye[2] = { 0 };       // [0] = left eye, [1] = right eye
-static XRControllerData xrController[2] = { 0 };  // [0] = left hand, [1] = right hand
+static const Vector3 groundHalfExtents = { 2.0f, 0.1f, 2.0f };
+static const float boxHalfExtent = 0.15f;
+
+static PhysicsBodyId groundBodyId = { 0 };
+static PhysicsBodyId boxBodyId = { 0 };
+
+#define PHYSICS_FIXED_DT (1.0f / 60.0f)
+#define PHYSICS_MAX_STEPS_PER_FRAME 5   // avoids the "spiral of death" on a lag spike
+static float physicsAccumulator = 0.0f;
 #endif
 
 //----------------------------------------------------------------------------------
 // Module Functions Declaration
 //----------------------------------------------------------------------------------
-static void UpdateDrawFrame(void);      // Update and Draw one frame (normal, non-XR path)
-
-#if defined(PLATFORM_WEB)
-static Matrix MatrixFromFloat16(const float* m);
-static void DrawSceneXR(Matrix view, Matrix proj);
-#endif
+static void UpdateDrawFrame(void);      // Update and draw one frame (non-XR 2D path)
 
 //------------------------------------------------------------------------------------
 // Program main entry point
@@ -94,18 +67,15 @@ static void DrawSceneXR(Matrix view, Matrix proj);
 int main(void)
 {
 #if !defined(_DEBUG)
-    SetTraceLogLevel(LOG_NONE);         // Disable raylib trace log messages
+    SetTraceLogLevel(LOG_NONE);
 #endif
 
-    // Initialization
-    //--------------------------------------------------------------------------------------
     InitWindow(screenWidth, screenHeight, "raylib gamejam template");
 
-    // TODO: Load resources / Initialize variables at this point
-
-    // Render texture to draw, enables screen scaling
     target = LoadRenderTexture(screenWidth, screenHeight);
     SetTextureFilter(target.texture, TEXTURE_FILTER_BILINEAR);
+
+    Game_Init();
 
 #if defined(PLATFORM_WEB)
     emscripten_set_main_loop(UpdateDrawFrame, 60, 1);
@@ -117,205 +87,153 @@ int main(void)
     }
 #endif
 
-    // De-Initialization
-    //--------------------------------------------------------------------------------------
+    Game_Shutdown();
     UnloadRenderTexture(target);
-
     CloseWindow();
-    //--------------------------------------------------------------------------------------
 
     return 0;
 }
 
 //--------------------------------------------------------------------------------------------
-// WebXR bridge functions (called directly from JavaScript, see minshell.html)
+// Game_* implementation (the game.h contract)
 //--------------------------------------------------------------------------------------------
+void Game_Init(void)
+{
+#if defined(PLATFORM_WEB)
+    Physics_Init();
+
+    // Static ground slab, top surface sits at y = 0
+    groundBodyId = Physics_CreateGroundBox(
+        (Vector3){ 0.0f, -groundHalfExtents.y, 0.0f },
+        groundHalfExtents);
+
+    // Dynamic box dropped above the ground so it falls into view
+    boxBodyId = Physics_CreateDynamicBox(
+        (Vector3){ 0.0f, 1.5f, -1.0f },
+        boxHalfExtent, 1.0f, 0.3f);
+#endif
+}
+
+void Game_Shutdown(void)
+{
+#if defined(PLATFORM_WEB)
+    Physics_Shutdown();
+#endif
+}
+
 #if defined(PLATFORM_WEB)
 
-// Converts a column-major float[16] (as given by WebXR's matrix.getFloat32Array())
-// into a raylib Matrix (also column-major internally)
-static Matrix MatrixFromFloat16(const float* m)
+void Game_Update(float realDeltaTime)
 {
-    Matrix result = { 0 };
-    result.m0 = m[0];   result.m4 = m[4];   result.m8 = m[8];    result.m12 = m[12];
-    result.m1 = m[1];   result.m5 = m[5];   result.m9 = m[9];    result.m13 = m[13];
-    result.m2 = m[2];   result.m6 = m[6];   result.m10 = m[10];   result.m14 = m[14];
-    result.m3 = m[3];   result.m7 = m[7];   result.m11 = m[11];   result.m15 = m[15];
-    return result;
+    // Fixed-timestep accumulator: WebXR calls us at the headset's own
+    // refresh rate (72/90/120Hz depending on device), but physics must
+    // always advance in fixed 1/60s steps regardless of that rate.
+    if (realDeltaTime > 0.25f) realDeltaTime = 0.25f;  // clamp huge stalls (tab switch, etc.)
+
+    physicsAccumulator += realDeltaTime;
+
+    int steps = 0;
+    while ((physicsAccumulator >= PHYSICS_FIXED_DT) && (steps < PHYSICS_MAX_STEPS_PER_FRAME))
+    {
+        Physics_Step(PHYSICS_FIXED_DT);
+        physicsAccumulator -= PHYSICS_FIXED_DT;
+        steps++;
+    }
 }
 
-// Called by JS once, when the WebXR session starts/ends
-EMSCRIPTEN_KEEPALIVE
-void XR_SetActive(int active)
+void Game_DrawScene(void)
 {
-    xrActive = (active != 0);
-    LOG("[XR] session active: %d\n", active);
-}
-
-// Called by JS once per eye, per XRFrame, BEFORE XR_RenderFrame()
-// viewMat / projMat: pointers to 16 floats each (column-major)
-EMSCRIPTEN_KEEPALIVE
-void XR_SetEyeData(int eye, float* viewMat, float* projMat, int vpX, int vpY, int vpW, int vpH)
-{
-    if ((eye < 0) || (eye > 1)) return;
-
-    xrEye[eye].view = MatrixFromFloat16(viewMat);
-    xrEye[eye].proj = MatrixFromFloat16(projMat);
-    xrEye[eye].vpX = vpX;
-    xrEye[eye].vpY = vpY;
-    xrEye[eye].vpW = vpW;
-    xrEye[eye].vpH = vpH;
-}
-
-// Called by JS once per connected controller, per XRFrame, BEFORE XR_RenderFrame().
-// hand: 0 = left, 1 = right
-// position/orientation: controller pose in the same space as the eye matrices
-// trigger/grip: 0.0-1.0 analog values; thumbX/thumbY: -1.0 to 1.0 stick axes
-// buttonA/buttonB/thumbClick: 0 or 1
-EMSCRIPTEN_KEEPALIVE
-void XR_SetController(int hand, int connected,
-    float px, float py, float pz,
-    float qx, float qy, float qz, float qw,
-    float trigger, float grip, float thumbX, float thumbY,
-    int buttonA, int buttonB, int thumbClick)
-{
-    if ((hand < 0) || (hand > 1)) return;
-
-    xrController[hand].connected = (connected != 0);
-    xrController[hand].position = (Vector3){ px, py, pz };
-    xrController[hand].orientation = (Quaternion){ qx, qy, qz, qw };
-    xrController[hand].trigger = trigger;
-    xrController[hand].grip = grip;
-    xrController[hand].thumbX = thumbX;
-    xrController[hand].thumbY = thumbY;
-    xrController[hand].buttonA = (buttonA != 0);
-    xrController[hand].buttonB = (buttonB != 0);
-    xrController[hand].thumbClick = (thumbClick != 0);
-}
-
-// Draws your 3D scene using an externally supplied view/projection matrix
-// NOTE: This bypasses raylib's Camera3D / BeginMode3D() math entirely,
-// since WebXR already gives us the exact per-eye projection.
-static void DrawSceneXR(Matrix view, Matrix proj)
-{
-    rlDrawRenderBatchActive();     // Flush any pending 2D batch first
-
-    rlMatrixMode(RL_PROJECTION);
-    rlPushMatrix();
-    rlLoadIdentity();
-    rlMultMatrixf(MatrixToFloat(proj));
-
-    rlMatrixMode(RL_MODELVIEW);
-    rlLoadIdentity();
-    rlMultMatrixf(MatrixToFloat(view));
-
     // ------------------------------------------------------------------
-    // TODO: draw your real 3D world here instead of this placeholder
+    // TODO: draw your real 3D world here
     // ------------------------------------------------------------------
     DrawGrid(10, 1.0f);
-    DrawCube((Vector3) { 0.0f, 0.5f, -1.5f }, 0.5f, 0.5f, 0.5f, RED);
-    DrawCubeWires((Vector3) { 0.0f, 0.5f, -1.5f }, 0.5f, 0.5f, 0.5f, MAROON);
+
+    // Ground
+    DrawCube((Vector3){ 0.0f, -groundHalfExtents.y, 0.0f },
+             groundHalfExtents.x * 2.0f, groundHalfExtents.y * 2.0f, groundHalfExtents.z * 2.0f,
+             DARKGRAY);
+
+    // Box driven by Box3D
+    {
+        Vector3 p = Physics_GetBodyPosition(boxBodyId);
+        Quaternion q = Physics_GetBodyRotation(boxBodyId);
+        Matrix rot = QuaternionToMatrix(q);
+
+        rlPushMatrix();
+        rlTranslatef(p.x, p.y, p.z);
+        rlMultMatrixf(MatrixToFloat(rot));
+
+        DrawCube((Vector3){ 0, 0, 0 }, boxHalfExtent * 2.0f, boxHalfExtent * 2.0f, boxHalfExtent * 2.0f, RED);
+        DrawCubeWires((Vector3){ 0, 0, 0 }, boxHalfExtent * 2.0f, boxHalfExtent * 2.0f, boxHalfExtent * 2.0f, MAROON);
+
+        rlPopMatrix();
+    }
 
     // Draw connected controllers: a sphere at each hand (brighter while the
-    // trigger is held) plus a thin aiming ray pointing in their forward direction
+    // trigger is held) plus a thin aiming ray
     for (int hand = 0; hand < 2; hand++)
     {
-        if (!xrController[hand].connected) continue;
+        const XRControllerData *c = XR_GetController(hand);
+        if (!c->connected) continue;
 
         Color handColor = (hand == 0) ? SKYBLUE : ORANGE;
-        // Blend towards white as the trigger is pressed, as a simple visual cue
-        handColor = ColorLerp(handColor, WHITE, xrController[hand].trigger);
+        handColor = ColorLerp(handColor, WHITE, c->trigger);
 
-        DrawSphere(xrController[hand].position, 0.03f, handColor);
+        DrawSphere(c->position, 0.03f, handColor);
 
-        // Controllers point down their local -Z axis by convention (targetRaySpace)
-        Matrix rot = QuaternionToMatrix(xrController[hand].orientation);
-        Vector3 forward = Vector3Transform((Vector3) { 0.0f, 0.0f, -1.0f }, rot);
-        Vector3 rayEnd = Vector3Add(xrController[hand].position, Vector3Scale(forward, 3.0f));
-        DrawLine3D(xrController[hand].position, rayEnd, handColor);
+        Matrix handRot = QuaternionToMatrix(c->orientation);
+        Vector3 forward = Vector3Transform((Vector3){ 0.0f, 0.0f, -1.0f }, handRot);
+        Vector3 rayEnd = Vector3Add(c->position, Vector3Scale(forward, 3.0f));
+        DrawLine3D(c->position, rayEnd, handColor);
 
-        // Example: grow the grip cube when squeezing, useful while wiring up input
-        if (xrController[hand].grip > 0.5f)
+        if (c->grip > 0.5f)
         {
-            DrawCubeWires(xrController[hand].position, 0.08f, 0.08f, 0.08f, handColor);
+            DrawCubeWires(c->position, 0.08f, 0.08f, 0.08f, handColor);
         }
     }
     // ------------------------------------------------------------------
-
-    rlDrawRenderBatchActive();     // Flush the 3D batch with this eye's matrices
-
-    rlMatrixMode(RL_PROJECTION);
-    rlPopMatrix();
-    rlMatrixMode(RL_MODELVIEW);
-    rlLoadIdentity();
-}
-
-// Called by JS once per XRFrame, after XR_SetEyeData() has been called for both eyes.
-// Renders both eyes into whatever framebuffer is currently bound on the GL context
-// (JS is responsible for binding session.renderState.baseLayer.framebuffer beforehand).
-EMSCRIPTEN_KEEPALIVE
-void XR_RenderFrame(void)
-{
-    rlClearScreenBuffers();        // Clears color+depth once for the whole XR framebuffer
-
-    for (int eye = 0; eye < 2; eye++)
-    {
-        rlViewport(xrEye[eye].vpX, xrEye[eye].vpY, xrEye[eye].vpW, xrEye[eye].vpH);
-        DrawSceneXR(xrEye[eye].view, xrEye[eye].proj);
-    }
 }
 
 #endif // PLATFORM_WEB
 
 //--------------------------------------------------------------------------------------------
-// Module Functions Definition
+// Non-XR fallback: the original 2D template, shown before entering VR
 //--------------------------------------------------------------------------------------------
-// Update and draw frame (normal / non-XR path)
 void UpdateDrawFrame(void)
 {
 #if defined(PLATFORM_WEB)
-    // While a WebXR session is active, rendering is fully driven by
-    // XR_RenderFrame(), called from JS inside session.requestAnimationFrame().
-    // We skip the regular 2D loop entirely to avoid touching the XR framebuffer.
-    if (xrActive) return;
+    if (XR_IsActive()) return;   // rendering is fully driven by XR_RenderFrame() while in VR
 #endif
 
-    // Update
-    //----------------------------------------------------------------------------------
     frameCounter++;
-    //----------------------------------------------------------------------------------
 
-    // Draw
-    //----------------------------------------------------------------------------------
     BeginTextureMode(target);
-    ClearBackground(RAYWHITE);
+        ClearBackground(RAYWHITE);
 
-    DrawRectangle(70, 90, 200, 200, BLACK);
-    DrawRectangle(70 + 16, 90 + 16, 200 - 32, 200 - 32, RAYWHITE);
-    DrawText("raylib", 70 + 200 - MeasureText("raylib", 40) - 32, 90 + 200 - 40 - 24, 40, BLACK);
+        DrawRectangle(70, 90, 200, 200, BLACK);
+        DrawRectangle(70 + 16, 90 + 16, 200 - 32, 200 - 32, RAYWHITE);
+        DrawText("raylib", 70 + 200 - MeasureText("raylib", 40) - 32, 90 + 200 - 40 - 24, 40, BLACK);
 
-    DrawText("6.x", 290, 90 - 26, 280, BLACK);
-    DrawText("GAMEJAM", 70, 90 + 210, 120, MAROON);
+        DrawText("6.x", 290, 90 - 26, 280, BLACK);
+        DrawText("GAMEJAM", 70, 90 + 210, 120, MAROON);
 
-    if ((frameCounter / 20) % 2) DrawText("are you ready?", 160, 500, 50, BLACK);
+        if ((frameCounter / 20) % 2) DrawText("are you ready?", 160, 500, 50, BLACK);
 
-    DrawRectangleLinesEx((Rectangle) { 0, 0, screenWidth, screenHeight }, 16, BLACK);
+        DrawRectangleLinesEx((Rectangle){ 0, 0, screenWidth, screenHeight }, 16, BLACK);
 
 #if defined(PLATFORM_WEB)
-    DrawText("Click 'Enter VR' to try WebXR", 40, 640, 20, DARKGRAY);
+        DrawText("Click 'Enter VR' to try WebXR", 40, 640, 20, DARKGRAY);
 #endif
 
     EndTextureMode();
 
-    // Render to screen (main framebuffer)
     BeginDrawing();
-    ClearBackground(RAYWHITE);
+        ClearBackground(RAYWHITE);
 
-    DrawTexturePro(target.texture, (Rectangle) { 0, 0, (float)target.texture.width, -(float)target.texture.height },
-        (Rectangle) {
-        0, 0, (float)target.texture.width, (float)target.texture.height
-    }, (Vector2) { 0, 0 }, 0.0f, WHITE);
+        DrawTexturePro(target.texture,
+            (Rectangle){ 0, 0, (float)target.texture.width, -(float)target.texture.height },
+            (Rectangle){ 0, 0, (float)target.texture.width, (float)target.texture.height },
+            (Vector2){ 0, 0 }, 0.0f, WHITE);
 
     EndDrawing();
-    //----------------------------------------------------------------------------------
 }
