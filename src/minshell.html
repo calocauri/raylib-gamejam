@@ -143,8 +143,15 @@
         xrButton.disabled = false;
         }
 
+        var lastFrameTime = null;
         function onXRFrame(time, frame) {
         xrSession.requestAnimationFrame(onXRFrame);
+
+        var deltaTime = 0;
+        if (lastFrameTime !== null) {
+            deltaTime = (time - lastFrameTime) / 1000.0; // ms -> segundos
+        }
+        lastFrameTime = time;
 
         var pose = frame.getViewerPose(xrRefSpace);
         if (!pose) return;
@@ -215,7 +222,8 @@
         );
         }
 
-        Module.ccall('XR_RenderFrame', null, [], []);
+        Module.ccall('XR_RenderFrame', null, ['number'], [deltaTime]);
+
         }
 
         async function enterXR() {
