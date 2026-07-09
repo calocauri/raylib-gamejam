@@ -70,12 +70,12 @@ jobs:
         path: box3d
 
     - name: Build Box3D for Web
-      shell: bash
+      shell: pwsh
       run: |
         cd box3d
         emcmake cmake -B build-web -DCMAKE_BUILD_TYPE=Release -DBOX3D_SAMPLES=OFF -DBOX3D_UNIT_TESTS=OFF -DBOX3D_BENCHMARKS=OFF -DBOX3D_DOCS=OFF
         emmake cmake --build build-web --config Release
-        find . -name "libbox3d*"
+        Get-ChildItem -Recurse -Filter "libbox3d*"
     
     - name: Build Product
       run: |
