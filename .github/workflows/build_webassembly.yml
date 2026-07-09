@@ -62,6 +62,21 @@ jobs:
         emcc -v
         make PLATFORM=PLATFORM_WEB RAYLIB_BUILD_MODE=RELEASE RAYLIB_LIBTYPE=STATIC EMSDK_PATH="D:/a/${{ env.PROJECT_REPO_NAME }}/${{ env.PROJECT_REPO_NAME }}/emsdk-cache/emsdk-main" RAYLIB_RELEASE_PATH=. -B
 
+    - name: Checkout Box3D
+      uses: actions/checkout@master
+      with:
+        repository: erincatto/box3d
+        ref: v0.1.0
+        path: box3d
+
+    - name: Build Box3D for Web
+      shell: pwsh
+      run: |
+        cd box3d
+        emcmake cmake -B build-web -DCMAKE_BUILD_TYPE=Release -DBOX3D_SAMPLES=OFF -DBOX3D_UNIT_TESTS=OFF -DBOX3D_BENCHMARKS=OFF -DBOX3D_DOCS=OFF
+        emmake cmake --build build-web --config Release
+        Get-ChildItem -Recurse -Filter "libbox3d*"
+    
     - name: Build Product
       run: |
         cd ${{ env.PROJECT_REPO_NAME }}/src
