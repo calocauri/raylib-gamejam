@@ -95,3 +95,18 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       if: github.event_name == 'release' && github.event.action == 'published'
+     
+    - name: Setup butler
+      shell: pwsh
+      run: |
+        Invoke-WebRequest -Uri "https://broth.itch.zone/butler/windows-amd64/LATEST/archive/default" -OutFile butler.zip
+        Expand-Archive -Path butler.zip -DestinationPath butler
+        echo "$(Resolve-Path butler)" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+    - name: Deploy to itch.io
+      shell: pwsh
+      env:
+        BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+      run: |
+        butler push ${{ env.PROJECT_RELEASE_PATH }} calocauri/raylib-gamejam-2026:html5 --userversion ${{ github.run_number }}
+      if: github.event_name == 'release' && github.event.action == 'published'
