@@ -318,7 +318,7 @@ ifeq ($(PLATFORM),PLATFORM_DESKTOP)
 endif
 ifeq ($(PLATFORM),PLATFORM_WEB)
     # Libraries for web (HTML5) compiling
-    LDLIBS = $(RAYLIB_LIB_PATH)/libraylib.web.a $(BOX3D_PATH)/build-web/bin/libbox3d.a
+    LDLIBS = $(RAYLIB_LIB_PATH)/libraylib.web.a $(BOX3D_PATH)/build-web/src/libbox3d.a
 endif
 ifeq ($(PLATFORM),PLATFORM_DRM)
     # Libraries for DRM compiling
